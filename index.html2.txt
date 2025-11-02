@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SketchShop — Single File</title>
+
+  <!-- Tailwind CDN for quick styling (no build) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    /* Small utility to keep product images same ratio */
+    .ratio-4-3 { aspect-ratio: 4 / 3; object-fit: cover; width:100%; }
+    a { text-decoration: none; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+
+  <header class="bg-white shadow sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto flex items-center justify-between p-4">
+      <a href="#/" class="text-2xl font-bold">SketchShop</a>
+      <nav class="flex gap-6 items-center">
+        <a href="#/" class="text-sm hover:text-gray-700">Home</a>
+        <a href="#/checkout" id="checkout-link" class="text-sm hover:text-gray-700">Checkout (0)</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="app" class="max-w-6xl mx-auto p-6 md:p-12"></main>
+
+  <footer class="max-w-6xl mx-auto text-center text-sm text-gray-500 py-6">
+    &copy; <span id="year"></span> SketchShop — curated sketch art.
+  </footer>
+
+<script>
+/* ---------------------------
+   Demo Data (products & artists)
+   --------------------------- */
+const USD_TO_INR = 83; // used previously in the demo
+const products = [
+  { id: "sk-001", title: "Whispering Pines — Pencil Sketch", artist: "A. Verma", price: 35.0, description: "Hand-drawn graphite sketch of a pine tree landscape.", dims: "11 x 14 in", image: "https://picsum.photos/seed/sk1/800/600?grayscale", available: 5, tags: ["landscape","pencil"] },
+  { id: "sk-002", title: "Urban Lines — Ink Sketch", artist: "R. Kapoor", price: 45.0, description: "High-contrast ink sketch of an alley and lamp posts.", dims: "12 x 16 in", image: "https://picsum.photos/seed/sk2/800/600?grayscale", available: 3, tags: ["urban","ink"] },
+  { id: "sk-003", title: "Portrait of a Doubter — Charcoal", artist: "M. Iyer", price: 75.0, description: "Charcoal portrait on toned paper.", dims: "9 x 12 in", image: "https://picsum.photos/seed/sk3/800/600?grayscale", available: 2, tags: ["portrait","charcoal"] },
+];
+
+const artists = {
+  "A. Verma": { name: "A. Verma", bio: "Aditi Verma is a fine-arts graduate specializing in nature sketches.", avatar: "https://i.pravatar.cc/150?img=3", social: { instagram: "https://instagram.com/aditi.verma.art" } },
+  "R. Kapoor": { name: "R. Kapoor", bio: "Rohan Kapoor's ink sketches explore city life and light.", avatar: "https://i.pravatar.cc/150?img=4", social: { instagram: "https://instagram.com/rohan.kapoor.sketches" } },
+  "M. Iyer": { name: "M. Iyer", bio: "Meera Iyer works with charcoal and mixed media for expressive portraits.", avatar: "https://i.pravatar.cc/150?img=5", social: { instagram: "https://instagram.com/meera.iyer.charcoal" } },
+};
+
+/* ---------------------------
+   Cart & Storage
+   --------------------------- */
+function readCart(){ try { return JSON.parse(localStorage.getItem('sketchshop_cart')||'[]'); } catch(e){ return []; } }
+function writeCart(cart){ localStorage.setItem('sketchshop_cart', JSON.stringify(cart)); updateHeaderCart(); }
+function addToCart(productId, qty=1){
+  const cart = readCart();
+  const prod = products.find(p=>p.id===productId);
+  if(!prod) return alert('Product not found');
+  // check inventory
+  const existingQty = cart.find(i=>i.id===productId)?.qty || 0;
+  if(existingQty + qty > prod.available) return alert('Not enough stock available.');
+  const found = cart.find(i=>i.id===productId);
+  if(found) found.qty += qty; else cart.push({ id:productId, title: prod.title, price: prod.price, qty });
+  writeCart(cart);
+  location.hash = '#/checkout';
+}
+function removeFromCart(productId){
+  const cart = readCart().filter(i=>i.id!==productId);
+  writeCart(cart);
+}
+function updateQty(productId, qty){
+  let cart = readCart();
+  qty = Number(qty) || 0;
+  if(qty<=0) return removeFromCart(productId);
+  const prod = products.find(p=>p.id===productId);
+  if(prod && qty > prod.available) return alert('Not enough stock available.');
+  cart = cart.map(i=> i.id===productId ? {...i, qty} : i);
+  writeCart(cart);
+}
+function cartSubtotal(){
+  const cart = readCart();
+  return cart.reduce((s,i)=>s + (i.price * i.qty), 0);
+}
+function cartCount(){
+  const cart = readCart();
+  return cart.reduce((s,i)=>s + i.qty, 0);
+}
+function clearCart(){ localStorage.removeItem('sketchshop_cart'); updateHeaderCart(); }
+
+/* ---------------------------
+   Utilities & Router
+   --------------------------- */
+document.getElementById('year').textContent = new Date().getFullYear();
+function el(tag, cls, inner){ const e = document.createElement(tag); if(cls) e.className = cls; if(inner!==undefined) e.innerHTML = inner; return e; }
+function r(templ){ document.getElementById('app').innerHTML = ''; document.getElementById('app').appendChild(templ); }
+function updateHeaderCart(){
+  const link = document.getElementById('checkout-link');
+  link.textContent = `Checkout (${cartCount()})`;
+}
+updateHeaderCart();
+
+/* ---------------------------
+   Views (Home, Product, Artist, Checkout)
+   --------------------------- */
+
+function HomeView(){
+  const container = el('div','grid grid-cols-1 md:grid-cols-4 gap-8');
+  const aside = el('aside','md:col-span-1 bg-white p-5 rounded-2xl shadow-sm');
+  const search = el('input','w-full border rounded-md px-3 py-2 mb-3');
+  search.placeholder = 'Search sketches';
+  let filterTag='all';
+  const tags = Array.from(new Set(products.flatMap(p=>p.tags)));
+  const tagsDiv = el('div','space-y-2');
+  const tagBtnAll = el('button',`block w-full text-left px-3 py-1 rounded ${filterTag==='all' ? 'bg-gray-900 text-white' : 'bg-gray-100'}`,'All');
+  tagBtnAll.onclick = ()=> { filterTag='all'; renderList(); };
+  tagsDiv.appendChild(tagBtnAll);
+  tags.forEach(t=>{
+    const b = el('button',`block w-full text-left px-3 py-1 rounded` , t);
+    b.onclick = ()=> { filterTag = t; renderList(); };
+    tagsDiv.appendChild(b);
+  });
+  aside.append(search, tagsDiv);
+
+  const section = el('section','md:col-span-3 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6');
+  container.append(aside, section);
+
+  function renderList(){
+    const q = search.value.trim().toLowerCase();
+    section.innerHTML = '';
+    const filtered = products.filter(p=>{
+      const qMatch = (p.title + p.description + p.artist).toLowerCase().includes(q);
+      const tagMatch = filterTag === 'all' || p.tags.includes(filterTag);
+      return qMatch && tagMatch;
+    });
+    filtered.forEach(p=>{
+      const card = el('a','bg-white rounded-2xl shadow-sm overflow-hidden hover:shadow-md','');
+      card.href = `#/art/${p.id}`;
+      const img = el('img','ratio-4-3');
+      img.src = p.image;
+      img.alt = p.title;
+      const info = el('div','p-4');
+      info.innerHTML = `<h3 class="font-semibold">${p.title}</h3><p class="text-xs text-gray-500">by ${p.artist}</p><p class="text-lg font-bold mt-2">₹${Math.round(p.price * USD_TO_INR)}</p>`;
+      card.append(img, info);
+      section.appendChild(card);
+    });
+    if(filtered.length === 0) section.appendChild(el('div','text-gray-500','No sketches found.'));
+  }
+
+  search.addEventListener('input', renderList);
+  renderList();
+  return container;
+}
+
+function ProductView(id){
+  const product = products.find(p=>p.id===id);
+  if(!product) return el('div','p-4','<strong>Product not found</strong>');
+  const wrapper = el('div','bg-white rounded-2xl shadow-sm overflow-hidden');
+  const grid = el('div','grid grid-cols-1 md:grid-cols-2');
+  const left = el('div','bg-gray-100 p-6');
+  const img = el('img','w-full h-96 object-contain');
+  img.src = product.image;
+  left.appendChild(img);
+
+  const right = el('div','p-6');
+  const title = el('h1','text-3xl font-bold', product.title);
+  const artistLink = el('a','text-gray-600 text-sm', `by ${product.artist}`);
+  artistLink.href = `#/artist/${encodeURIComponent(product.artist)}`;
+  const desc = el('p','mt-4 text-gray-700', product.description);
+  const price = el('p','text-lg font-semibold mt-4', `₹${Math.round(product.price * USD_TO_INR)}`);
+  const addBtn = el('button','mt-4 bg-gray-900 text-white px-4 py-2 rounded-lg','Add to Cart');
+  addBtn.onclick = ()=> addToCart(product.id, 1);
+
+  right.append(title, artistLink, desc, price, addBtn);
+  grid.append(left, right);
+  wrapper.appendChild(grid);
+
+  // Artist section
+  const artist = artists[product.artist];
+  if(artist){
+    const artistBlock = el('div','p-6 border-t bg-gray-50');
+    artistBlock.innerHTML = `<h3 class="text-sm font-semibold mb-2">About the Artist</h3>`;
+    const flex = el('div','flex items-center gap-4');
+    const av = el('img','w-12 h-12 rounded-full');
+    av.src = artist.avatar;
+    const info = el('div','');
+    info.innerHTML = `<div class="font-medium">${artist.name}</div><div class="text-xs text-gray-600">${artist.bio}</div>`;
+    flex.append(av, info);
+    artistBlock.appendChild(flex);
+    wrapper.appendChild(artistBlock);
+  }
+
+  return wrapper;
+}
+
+function ArtistView(name){
+  const artist = artists[name];
+  if(!artist) return el('div','p-4','<strong>Artist not found</strong>');
+  const top = el('div','space-y-6');
+  const header = el('div','bg-white p-6 rounded-2xl shadow-sm flex items-center gap-6');
+  const av = el('img','w-24 h-24 rounded-full');
+  av.src = artist.avatar;
+  const info = el('div','');
+  info.innerHTML = `<h1 class="text-2xl font-bold">${artist.name}</h1><p class="text-gray-600 text-sm">${artist.bio}</p>`;
+  if(artist.social?.instagram) {
+    const ig = el('a','text-blue-600 text-sm block mt-2','Instagram');
+    ig.href = artist.social.instagram;
+    ig.target = '_blank';
+    info.appendChild(ig);
+  }
+  header.append(av, info);
+  top.appendChild(header);
+
+  const works = products.filter(p=>p.artist === name);
+  const grid = el('div','grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6');
+  works.forEach(w=>{
+    const card = el('a','bg-white rounded-2xl shadow-sm overflow-hidden');
+    card.href = `#/art/${w.id}`;
+    const img = el('img','ratio-4-3');
+    img.src = w.image;
+    const info = el('div','p-4');
+    info.innerHTML = `<h3 class="font-semibold">${w.title}</h3><p class="text-xs text-gray-500">₹${Math.round(w.price * USD_TO_INR)}</p>`;
+    card.append(img, info);
+    grid.append(card);
+  });
+  top.appendChild(grid);
+  return top;
+}
+
+function CheckoutView(){
+  let cart = readCart();
+  const box = el('div','bg-white p-6 rounded-2xl shadow-sm');
+  const title = el('h2','text-2xl font-bold mb-4','Checkout');
+  box.appendChild(title);
+
+  if(cart.length === 0){
+    const empty = el('div','text-gray-600 text-center py-12');
+    empty.innerHTML = `Your cart is empty. <a href="#/" class="text-blue-600 underline">Shop now</a>`;
+    box.appendChild(empty);
+    return box;
+  }
+
+  const list = el('div','space-y-6');
+  cart.forEach(item=>{
+    const row = el('div','flex items-center justify-between border-b pb-2');
+    const left = el('div','');
+    left.innerHTML = `<div class="font-medium">${item.title}</div><div class="text-xs text-gray-500">Qty: <input data-id="${item.id}" type="number" min="1" value="${item.qty}" class="w-16 rounded px-2 py-1 inline-block ml-2 border" /></div>`;
+    const right = el('div', '', `₹${Math.round(item.price * USD_TO_INR * item.qty)} <button data-rid="${item.id}" class="text-xs text-red-600 ml-3">Remove</button>`);
+    row.append(left, right);
+    list.appendChild(row);
+  });
+  box.appendChild(list);
+
+  // shipping
+  const shippingRow = el('div','pt-4 border-t');
+  const shipLabel = el('label','block mb-2 text-sm','Shipping Options');
+  const select = el('select','border rounded-md px-3 py-2');
+  select.innerHTML = `<option value="standard">Standard (₹${5*USD_TO_INR})</option><option value="express">Express (₹${10*USD_TO_INR})</option>`;
+  shippingRow.append(shipLabel, select);
+  box.appendChild(shippingRow);
+
+  // totals
+  function computeTotals(){
+    cart = readCart();
+    const subtotal = cart.reduce((s,i)=> s + i.price * i.qty, 0);
+    const shippingCost = (select.value === 'express') ? 10 : 5;
+    const total = subtotal + shippingCost;
+    return { subtotal, shippingCost, total };
+  }
+
+  const totalsDiv = el('div','pt-4 border-t');
+  function refreshTotals(){
+    const t = computeTotals();
+    totalsDiv.innerHTML = `
+      <div class="flex justify-between"><div>Subtotal</div><div>₹${Math.round(t.subtotal * USD_TO_INR)}</div></div>
+      <div class="flex justify-between"><div>Shipping</div><div>₹${Math.round(t.shippingCost * USD_TO_INR)}</div></div>
+      <div class="font-bold flex justify-between text-lg border-t pt-2"><div>Total</div><div>₹${Math.round(t.total * USD_TO_INR)}</div></div>
+    `;
+  }
+  refreshTotals();
+  box.appendChild(totalsDiv);
+
+  const payBtn = el('button','w-full bg-gray-900 text-white px-4 py-2 rounded-lg mt-4','Pay with Stripe (Demo)');
+  box.append(payBtn);
+
+  // Events: dynamic quantity change, remove, shipping, pay
+  box.addEventListener('click', (ev)=>{
+    if(ev.target.matches('button[data-rid]')){
+      const id = ev.target.getAttribute('data-rid');
+      removeFromCart(id);
+      render(); // re-render whole app (router will load checkout again)
+    }
+  });
+
+  box.addEventListener('change', (ev)=>{
+    if(ev.target.matches('input[type="number"][data-id]')){
+      const id = ev.target.getAttribute('data-id');
+      const q = Number(ev.target.value);
+      updateQty(id, q);
+      refreshTotals();
+      updateHeaderCart();
+    }
+    if(ev.target === select){
+      refreshTotals();
+    }
+  });
+
+  payBtn.addEventListener('click', async ()=>{
+    payBtn.disabled = true;
+    payBtn.textContent = 'Processing Payment...';
+    await new Promise(r=>setTimeout(r,1500)); // fake delay
+    alert('Payment successful! (demo). Thank you for your purchase.');
+    clearCart();
+    render();
+  });
+
+  return box;
+}
+
+/* ---------------------------
+   Main router & render
+   --------------------------- */
+function parseHash(){
+  const hash = location.hash.slice(1) || '/';
+  const parts = hash.split('/').filter(Boolean);
+  return parts;
+}
+
+function render(){
+  updateHeaderCart();
+  const parts = parseHash();
+  const app = document.getElementById('app');
+  app.innerHTML = '';
+  if(parts.length === 0 || parts[0] === ''){
+    app.appendChild(HomeView());
+    return;
+  }
+
+  if(parts[0] === 'art' && parts[1]){
+    const id = parts[1];
+    app.appendChild(ProductView(id));
+    return;
+  }
+
+  if(parts[0] === 'artist' && parts[1]){
+    const name = decodeURIComponent(parts.slice(1).join('/'));
+    app.appendChild(ArtistView(name));
+    return;
+  }
+
+  if(parts[0] === 'checkout'){
+    app.appendChild(CheckoutView());
+    return;
+  }
+
+  app.appendChild(el('div','p-4','<strong>Page not found</strong>'));
+}
+
+/* initial render + router hook */
+window.addEventListener('hashchange', render);
+render();
+</script>
+
+</body>
+</html>
